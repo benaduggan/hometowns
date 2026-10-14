@@ -51,6 +51,8 @@ export const es: Messages = {
   "map.tooltip.yourHome": "tu casa",
   "map.numbers.one": "{count} número",
   "map.numbers.other": "{count} números",
+  "map.intro.counted.one": "{count} número contado",
+  "map.intro.counted.other": "{count} números contados",
 
   // Legend
   "legend.aria": "Leyenda del mapa",

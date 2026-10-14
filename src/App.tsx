@@ -94,6 +94,8 @@ export function App() {
   const { theme, setTheme, dark } = useTheme();
   const online = useOnline();
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  // Bumped whenever contacts land on the map, so it plays its intro once.
+  const [introId, setIntroId] = useState(0);
   const sidebarRef = useRef<HTMLElement>(null);
   const [showTop, setShowTop] = useState(false);
 
@@ -194,6 +196,19 @@ export function App() {
     };
   }, [comparison, compareColors, shapeCounts, scale, ramp]);
 
+  // A comparison is colored by overlap rather than count, so it gets no intro.
+  const intro = useMemo(() => {
+    if (!introId || comparison || !shapeCounts || !scale || !result) return undefined;
+    let numbers = 0;
+    for (const count of result.counts.values()) numbers += count;
+    return {
+      id: introId,
+      counts: shapeCounts,
+      colorFor: (count: number) => ramp[scale.classFor(count)]!,
+      numbers,
+    };
+  }, [introId, comparison, shapeCounts, scale, ramp, result]);
+
   const selectCode = (code: AreaCode) => {
     setSelectedCode(code);
     setSelectedShape(code.shapeIds[0] ?? null);
@@ -207,6 +222,7 @@ export function App() {
 
   const handleImport = (incoming: ImportResult) => {
     setResult((prev) => (prev ? mergeResults([prev, incoming]) : incoming));
+    setIntroId((id) => id + 1);
     setQuery("");
     setSelectedCode(null);
     setSelectedShape(null);
@@ -217,6 +233,7 @@ export function App() {
     if (!example) beforeExample.current = { result, home };
     setExample({ mine, theirs });
     setResult(buildExample(mine));
+    setIntroId((id) => id + 1);
     setHome(getExample(mine).home);
     setShared(
       theirs ? { counts: buildExample(theirs).counts, home: getExample(theirs).home } : null,
@@ -533,6 +550,7 @@ export function App() {
               homeShapeIds={homeShapes}
               theirHomeShapeIds={theirHomeShapes}
               onSelectShape={selectShape}
+              intro={intro}
               renderTooltip={(shapeId) => {
                 const primary = primaryCodeOnShape(shapeId);
                 if (!primary) return shapeId;
