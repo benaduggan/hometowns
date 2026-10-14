@@ -3,11 +3,13 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import "d3-transition";
@@ -23,6 +25,7 @@ import {
 } from "../../lib/geo/model";
 import { useI18n, type MessageKey } from "../../lib/i18n";
 import { HOUSE_PATH } from "../Icons";
+import { canPlayIntro, easeInOut, planIntro, playIntro, type IntroPlan } from "./intro";
 import "./AreaCodeMap.css";
 
 export interface AreaCodeMapProps {
@@ -40,6 +43,20 @@ export interface AreaCodeMapProps {
   onHoverShape?: (shapeId: string | null) => void;
   /** Rendered inside the tooltip for the hovered shape. */
   renderTooltip?: (shapeId: string) => React.ReactNode;
+  /**
+   * The animation for freshly mapped contacts. It plays once per id; the rest
+   * is read when it starts, so a home entered afterwards does not replay it.
+   */
+  intro?: MapIntro;
+}
+
+export interface MapIntro {
+  id: number;
+  /** Contacts per shape. */
+  counts: ReadonlyMap<string, number>;
+  colorFor: (count: number) => string;
+  /** Phone numbers in the import, for the running total. */
+  numbers: number;
 }
 
 export interface AreaCodeMapHandle {
@@ -71,10 +88,11 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
     onSelectShape,
     onHoverShape,
     renderTooltip,
+    intro,
   },
   ref,
 ) {
-  const { t } = useI18n();
+  const { t, tn } = useI18n();
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -82,6 +100,35 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
   const [hovered, setHovered] = useState<string | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
   const dragging = useRef(false);
+
+  // Plan the intro while rendering, the moment a new id arrives, so the first
+  // paint already has every shape held at its starting color.
+  const [introSeen, setIntroSeen] = useState<number | null>(null);
+  const [plan, setPlan] = useState<IntroPlan | null>(null);
+  if (intro && intro.id !== introSeen) {
+    setIntroSeen(intro.id);
+    const homeId = homeShapeIds?.[0];
+    setPlan(canPlayIntro() ? planIntro({ ...intro, homeShapeId: homeId }) : null);
+  } else if (!intro && plan) {
+    setPlan(null);
+  }
+
+  useLayoutEffect(() => {
+    const root = containerRef.current;
+    if (!plan || !root) return;
+    const anims = playIntro(root, plan);
+    // Leave the arcs and the total up a beat after the last place lights.
+    const done = setTimeout(() => setPlan(null), plan.duration + 900);
+    return () => {
+      clearTimeout(done);
+      for (const a of anims) a.cancel();
+    };
+  }, [plan]);
+
+  /** Any reach for the map means "I've seen enough": jump to the finished map. */
+  const skipIntro = () => {
+    if (plan) setPlan(null);
+  };
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -143,7 +190,11 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
         if (b) zoomToBounds(b);
       },
       resetZoom,
-      getExportRoot: () => containerRef.current,
+      getExportRoot: () => {
+        // Export the finished map, not whatever frame the intro is on.
+        flushSync(() => setPlan(null));
+        return containerRef.current;
+      },
     }),
     [zoomToBounds, resetZoom],
   );
@@ -243,12 +294,14 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
         transform={`translate(${cx} ${cy}) scale(${1 / k})`}
         data-home={mine ? "mine" : "theirs"}
       >
-        <circle className="home-marker-disc" r={9} />
-        <path
-          className="home-marker-house"
-          d={HOUSE_PATH}
-          transform="translate(-6 -6) scale(0.5)"
-        />
+        <g className={plan ? "home-marker-pop" : undefined}>
+          <circle className="home-marker-disc" r={9} />
+          <path
+            className="home-marker-house"
+            d={HOUSE_PATH}
+            transform="translate(-6 -6) scale(0.5)"
+          />
+        </g>
       </g>
     );
   };
@@ -298,7 +351,13 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
   const inset = (id: string) => INSETS.find((i) => i.id === id)!;
 
   return (
-    <div className="map-container" ref={containerRef} onPointerMove={handleMove}>
+    <div
+      className="map-container"
+      ref={containerRef}
+      onPointerMove={handleMove}
+      onPointerDown={skipIntro}
+      onWheel={skipIntro}
+    >
       <svg
         ref={svgRef}
         className="map-svg"
@@ -322,6 +381,22 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
         </defs>
         <g className="main" transform={transform.toString()}>
           {renderShapes("main", transform.k)}
+          {plan?.kind === "flights" && (
+            <g className="intro-arcs" aria-hidden="true">
+              {plan.flights.map(
+                (f) =>
+                  f.arc && (
+                    <path
+                      key={f.shapeId}
+                      className="intro-arc"
+                      d={f.arc}
+                      pathLength={1}
+                      style={{ animationDelay: `${f.depart}ms` }}
+                    />
+                  ),
+              )}
+            </g>
+          )}
           {renderHome("main", theirHomeShapeIds, false)}
           {renderHome("main", homeShapeIds, true)}
         </g>
@@ -371,6 +446,13 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
           </button>
         )}
       </div>
+      {plan?.kind === "tally" && (
+        <IntroTotal
+          duration={plan.duration}
+          numbers={plan.numbers}
+          format={(count) => tn("map.intro.counted", count)}
+        />
+      )}
       {hovered && pointer && renderTooltip && (
         <div className="map-tooltip" style={{ left: pointer.x, top: pointer.y }} role="tooltip">
           {renderTooltip(hovered)}
@@ -379,3 +461,32 @@ export const AreaCodeMap = forwardRef<AreaCodeMapHandle, AreaCodeMapProps>(funct
     </div>
   );
 });
+
+/** The running total in the corner while a tally plays. Decorative: the result panel says it properly. */
+function IntroTotal({
+  duration,
+  numbers,
+  format,
+}: {
+  duration: number;
+  numbers: number;
+  format: (count: number) => string;
+}) {
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / duration);
+      setProgress(p);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [duration]);
+  return (
+    <div className="intro-total" aria-hidden="true">
+      {format(Math.round(easeInOut(progress) * numbers))}
+    </div>
+  );
+}

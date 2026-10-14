@@ -209,3 +209,77 @@
   stroke-width: 1.5;
   opacity: 0.8;
 }
+
+/* --- Intro: plays once when contacts are first mapped (see intro.ts) --- */
+
+/* Draw out from home, then retract into the destination: a comet, not a web.
+   No non-scaling-stroke here: with it, Chrome measures the dashes in screen
+   pixels, so once the map is drawn wider than its viewBox the pathLength="1"
+   dash is shorter than the arc and pieces of it show before it departs. */
+.intro-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  /* Round caps would leave a dot where the zero-length dash sits. */
+  stroke-linecap: butt;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  pointer-events: none;
+  animation: intro-fly 1100ms cubic-bezier(0.45, 0, 0.55, 1) both;
+}
+
+@keyframes intro-fly {
+  from {
+    stroke-dashoffset: 1;
+  }
+  50% {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+
+.home-marker-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: intro-home-pop 600ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+
+@keyframes intro-home-pop {
+  from {
+    transform: scale(0);
+  }
+}
+
+/* Beside the zoom controls: the legend owns the other corner. */
+.intro-total {
+  position: absolute;
+  top: 0.9rem;
+  right: 3.5rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  pointer-events: none;
+  animation: intro-total-in 300ms ease both;
+}
+
+@keyframes intro-total-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The intro never starts under reduced motion; this covers a mid-play change. */
+@media (prefers-reduced-motion: reduce) {
+  .intro-arc,
+  .home-marker-pop,
+  .intro-total {
+    animation: none;
+  }
+
+  .intro-arc {
+    display: none;
+  }
+}

@@ -57,6 +57,8 @@ export const en = {
   "map.tooltip.yourHome": "your home",
   "map.numbers.one": "{count} number",
   "map.numbers.other": "{count} numbers",
+  "map.intro.counted.one": "{count} number counted",
+  "map.intro.counted.other": "{count} numbers counted",
 
   // Legend
   "legend.aria": "Map legend",
